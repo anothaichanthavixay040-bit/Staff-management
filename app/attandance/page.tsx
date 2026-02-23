@@ -1,69 +1,80 @@
 "use client"
-
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { Html5QrcodeScanner } from "html5-qrcode"
 import { supabase } from "@/lib/supabaseClient"
 
-export default function ScanAttendance() {
-  const [scanResult, setScanResult] = useState<string | null>(null)
-  const [status, setStatus] = useState<string>("")
-  const [staffName, setStaffName] = useState<string>("")
+export default function ScanPage() {
+  const [msg, setMsg] = useState("Scan your QR Code")
+  const [isProcessing, setIsProcessing] = useState(false) // ป้องกันการส่งข้อมูลซ้ำ
+  const scannerRef = useRef<any>(null)
 
-  // ...existing code...
   useEffect(() => {
     const scanner = new Html5QrcodeScanner(
-      "reader",
-      { fps: 10, qrbox: { width: 280, height: 280 } },
+      "reader", 
+      { fps: 10, qrbox: { width: 250, height: 250 } }, 
       false
     )
+    scannerRef.current = scanner
 
-    scanner.render(onScanSuccess, (err) => { /* ignore error */ })
+    scanner.render(async (decodedText) => {
+      // 1. ป้องกันการสแกนรัวๆ (ถ้ากำลังบันทึกอยู่ ให้หยุดก่อน)
+      if (isProcessing) return;
 
-    async function onScanSuccess(decodedText: string) {
-      setScanResult(decodedText)
-      await scanner.clear()
+      setIsProcessing(true)
+      setMsg("⌛ Processing...")
 
-      try {
-        const staffId = parseInt(decodedText)
-        // ...existing code...
-      } catch (err) { /* ... */ }
-    }
+      // 2. ส่งข้อมูลไป Supabase
+      const { error } = await supabase
+        .from("attendance")
+        .insert([{ staff_id: parseInt(decodedText) }])
 
-    // synchronous cleanup — do NOT return an async function
+      if (!error) {
+        setMsg("✅ Success! Welcome to work.")
+        
+        // 3. หลังจาก 3 วินาที ให้กลับมาพร้อมสแกนใหม่
+        setTimeout(() => {
+          setMsg("Scan your QR Code")
+          setIsProcessing(false)
+        }, 3000)
+      } else {
+        setMsg(`❌ Error: ${error.message}`)
+        setTimeout(() => setIsProcessing(false), 3000) // ปลดล็อคให้ลองสแกนใหม่
+      }
+    }, (err) => {
+      // error callback (ปล่อยว่างไว้ได้)
+    })
+
     return () => {
-      // call clear() but don't return its Promise
-      scanner.clear().catch(() => { /* ignore error */ })
+      if (scannerRef.current) {
+        scannerRef.current.clear()
+      }
     }
-  }, [])
-// ...existing code...
+  }, [isProcessing]) // ให้ useEffect ตรวจสอบสถานะการบันทึก
 
   return (
-    <div className="p-8 max-w-xl mx-auto text-center space-y-8 bg-[#0f172a] min-h-screen text-white">
-      <div className="space-y-2">
-        <h1 className="text-3xl font-black italic uppercase tracking-tighter">Staff Check-In</h1>
-        <p className="text-gray-400 text-sm font-medium">scan QR Code on staff card</p>
+    <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center p-6 text-white">
+      <div className="mb-8 text-center">
+        <h1 className="text-3xl font-black italic uppercase text-blue-500">Staff Scanner</h1>
+        <p className="text-gray-400 text-sm">Please align QR code within the frame</p>
+      </div>
+
+      <div id="reader" className="w-full max-w-md overflow-hidden rounded-3xl border-4 border-blue-500 shadow-2xl"></div>
+
+      <div className={`mt-10 px-8 py-4 rounded-2xl font-bold text-xl transition-all shadow-lg ${
+        msg.includes('✅') ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500' : 
+        msg.includes('❌') ? 'bg-red-500/20 text-red-400 border border-red-500' :
+        'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+      }`}>
+        {msg}
       </div>
       
-      {/* จอสำหรับสแกน */}
-      <div id="reader" className="overflow-hidden rounded-[2.5rem] border-4 border-blue-500/30 shadow-2xl shadow-blue-500/20"></div>
-
-      {status && (
-        <div className={`p-6 rounded-[2rem] border animate-in fade-in zoom-in duration-300 ${
-          status.includes('✅') 
-            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
-            : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
-        }`}>
-          <p className="text-lg font-bold mb-1">{status}</p>
-          {staffName && <p className="text-sm opacity-80 font-medium">พนักงาน: {staffName}</p>}
-          
-          <button 
-            onClick={() => window.location.reload()}
-            className="mt-4 px-6 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-xs font-black uppercase tracking-widest transition-all"
-          >
-            next 🔄
-          </button>
-        </div>
-      )}
+      {/* เพิ่มปุ่ม Refresh เผื่อกล้องค้าง */}
+      <button 
+        onClick={() => window.location.reload()}
+        className="mt-8 text-gray-500 text-xs underline"
+      >
+        Reset Camera
+      </button>
     </div>
   )
 }
