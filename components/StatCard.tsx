@@ -6,8 +6,8 @@ type StatCardProps = {
   title: string;
   value: string | number;
   description?: string;
-  icon?: React.ReactNode; // เพิ่ม prop สำหรับ icon
-  trend?: string; // เพิ่ม prop สำหรับแสดงแนวโน้ม เช่น +12%
+  icon?: React.ReactNode;
+  trend?: string;
 };
 
 export default function StatCard({
