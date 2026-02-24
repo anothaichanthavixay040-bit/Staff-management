@@ -10,79 +10,110 @@ export default function ScanPage() {
     const scannerRef = useRef<any>(null)
 
     useEffect(() => {
-    // ฟังก์ชันเริ่มสแกน
-    const startScanner = () => {
-      if (!scannerRef.current) {
-        const scanner = new Html5QrcodeScanner(
-          "reader",
-          { 
-            fps: 10, 
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0,
-            rememberLastUsedCamera: true // จำกล้องล่าสุดที่ใช้
-          },
-          false
-        );
+        // ฟังก์ชันเริ่มสแกน
+        const startScanner = () => {
+            if (!scannerRef.current) {
+                const scanner = new Html5QrcodeScanner(
+                    "reader",
+                    {
+                        fps: 10,
+                        qrbox: { width: 250, height: 250 },
+                        aspectRatio: 1.0,
+                        rememberLastUsedCamera: true // จำกล้องล่าสุดที่ใช้
+                    },
+                    false
+                );
 
-        scanner.render(async (decodedText) => {
-          if (isProcessingRef.current) return;
+                scanner.render(async (decodedText) => {
+                    if (isProcessingRef.current) return;
 
-          // ทำความสะอาดข้อมูล: ตัดช่องว่าง และเอาเฉพาะตัวเลข
-          const cleanId = decodedText.trim().replace(/\D/g, ''); 
-          const staffIdNumber = parseInt(cleanId);
+                    const staffId = decodedText.trim();
 
-          if (isNaN(staffIdNumber)) {
-            setMsg("❌ Error: Invalid QR (Must be a number)");
-            return;
-          }
+                    // ✅ ตรวจสอบรูปแบบ UUID (v4)
+                    const uuidRegex =
+                        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-          isProcessingRef.current = true;
-          setMsg("⌛ Processing...");
+                    if (!uuidRegex.test(staffId)) {
+                        setMsg("❌ Invalid QR Code");
+                        return;
+                    }
 
-          try {
-            const { error } = await supabase
-              .from("attendance")
-              .insert([{
-                staff_id: staffIdNumber,
-                status: "On Time",
-                check_in_time: new Date().toISOString()
-              }]);
+                    isProcessingRef.current = true;
+                    setMsg("⌛ Verifying...");
 
-            if (!error) {
-              setMsg(`✅ Success! ID: ${staffIdNumber}`);
-              // หน่วงเวลา 2.5 วินาที แล้วให้เริ่มสแกนใหม่ได้
-              setTimeout(() => {
-                setMsg("Scan your QR Code");
-                isProcessingRef.current = false;
-              }, 2500);
-            } else {
-              throw error;
+                    try {
+                        // ✅ 1. ตรวจสอบว่ามีพนักงานจริง
+                        const { data: staff, error: findError } = await supabase
+                            .from("staff")
+                            .select("id, name")
+                            .eq("id", staffId)
+                            .single();
+
+                        if (findError || !staff) {
+                            throw new Error("Staff not found");
+                        }
+
+                        // ✅ 2. กันเช็คอินซ้ำในวันเดียวกัน
+                        const todayStart = new Date();
+                        todayStart.setHours(0, 0, 0, 0);
+
+                        const { data: existing } = await supabase
+                            .from("attendance")
+                            .select("id")
+                            .eq("staff_id", staff.id)
+                            .gte("check_in_time", todayStart.toISOString());
+
+                        if (existing && existing.length > 0) {
+                            throw new Error("Already checked in today");
+                        }
+
+                        // ✅ 3. บันทึกข้อมูล
+                        const { error: insertError } = await supabase
+                            .from("attendance")
+                            .insert([
+                                {
+                                    staff_id: staff.id,
+                                    status: "On Time",
+                                    check_in_time: new Date().toISOString(),
+                                },
+                            ]);
+
+                        if (insertError) throw insertError;
+
+                        setMsg(`✅ Welcome ${staff.name}`);
+
+                        setTimeout(() => {
+                            setMsg("Scan your QR Code");
+                            isProcessingRef.current = false;
+                        }, 2500);
+
+                    } catch (error: any) {
+                        setMsg(`❌ ${error.message}`);
+
+                        setTimeout(() => {
+                            isProcessingRef.current = false;
+                            setMsg("Scan your QR Code");
+                        }, 3000);
+                    }
+
+                }, (err) => {
+                    // ปล่อยว่างเพื่อไม่ให้ Console บวม
+                });
+
+                scannerRef.current = scanner;
             }
-          } catch (error: any) {
-            setMsg(`❌ Error: ${error.message}`);
-            setTimeout(() => {
-              isProcessingRef.current = false;
-              setMsg("Scan your QR Code");
-            }, 3000);
-          }
-        }, (err) => {
-          // ปล่อยว่างเพื่อไม่ให้ Console บวม
-        });
+        };
 
-        scannerRef.current = scanner;
-      }
-    };
+        startScanner();
 
-    startScanner();
-
-    // Cleanup: ล้าง Scanner เมื่อปิดหน้าเว็บ
-    return () => {
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch((error: any) => console.error("Failed to clear scanner", error));
-        scannerRef.current = null;
-      }
-    };
-  }, []);
+        // Cleanup: ล้าง Scanner เมื่อปิดหน้าเว็บ
+        return () => {
+            if (scannerRef.current) {
+                scannerRef.current.clear().catch((error: any) => console.error("Failed to clear scanner", error));
+                scannerRef.current = null;
+            }
+        };
+    }, []);
 
     return (
         <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center p-6 text-white text-center font-sans">
@@ -112,8 +143,8 @@ export default function ScanPage() {
 
             {/* ส่วนแสดงข้อความสถานะ */}
             <div className={`mt-10 px-10 py-5 rounded-[2rem] font-black text-xl transition-all border-2 flex items-center gap-3 shadow-2xl ${msg.includes('✅') ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/40 shadow-emerald-500/10' :
-                    msg.includes('❌') ? 'bg-red-500/10 text-red-400 border-red-500/40 shadow-red-500/10' :
-                        'bg-blue-500/5 text-blue-400 border-blue-500/20'
+                msg.includes('❌') ? 'bg-red-500/10 text-red-400 border-red-500/40 shadow-red-500/10' :
+                    'bg-blue-500/5 text-blue-400 border-blue-500/20'
                 }`}>
                 {msg}
             </div>
