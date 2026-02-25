@@ -25,33 +25,31 @@ export default function ScanPage() {
                 scanner.render(async (decodedText) => {
                     if (isProcessingRef.current) return;
 
-                    const staffId = decodedText.trim();
+                    // ✅ ปรับให้ดึง UUID ออกมาแม้จะมีข้อความอื่นปน (แก้ปัญหา Me-QR ติด URL)
+                    const uuidMatch = decodedText.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
 
-                    // ✅ ปรับ Regex ให้ยืดหยุ่นขึ้น (เช็คแค่ว่าเป็นรูปแบบ UUID หรือไม่ โดยไม่สน Version)
-                    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-                    if (!uuidRegex.test(staffId)) {
+                    if (!uuidMatch) {
                         setMsg("❌ Invalid QR Format");
                         return;
                     }
 
+                    const cleanUuid = uuidMatch[0]; // ได้ UUID เพียวๆ
                     isProcessingRef.current = true;
-                    setMsg("⌛ Verifying...");
+                    setMsg("⌛ Verifying Secure ID...");
 
                     try {
                         // 1. ตรวจสอบพนักงาน
                         const { data: staff, error: findError } = await supabase
                             .from("staff")
                             .select("id, name")
-                            .eq("id", staffId)
-                            .maybeSingle(); // ใช้ maybeSingle เพื่อไม่ให้ throw error ถ้าไม่เจอ
+                            .eq("id", cleanUuid)
+                            .maybeSingle();
 
                         if (findError) throw findError;
-                        if (!staff) throw new Error("Staff not found in system");
+                        if (!staff) throw new Error("Staff not found");
 
                         // 2. กันเช็คอินซ้ำ (เช็คเฉพาะวันที่ปัจจุบัน)
                         const today = new Date().toISOString().split('T')[0];
-                        
                         const { data: existing, error: checkError } = await supabase
                             .from("attendance")
                             .select("id")
@@ -61,38 +59,33 @@ export default function ScanPage() {
                             .maybeSingle();
 
                         if (checkError) throw checkError;
-                        if (existing) throw new Error("Already checked in today");
+                        if (existing) throw new Error("Already checked in");
 
-                        // 3. บันทึกข้อมูล
+                        // 3. บันทึกข้อมูล (แก้ไขจุดที่ตัวแปรผิด)
                         const { error: insertError } = await supabase
                             .from("attendance")
-                            .insert([
-                                {
-                                    staff_id: staff.id,
-                                    status: "On Time",
-                                    check_in_time: new Date().toISOString(),
-                                },
-                            ]);
+                            .insert([{
+                                staff_id: cleanUuid,
+                                status: "On Time",
+                                check_in_time: new Date().toISOString()
+                            }]);
 
                         if (insertError) throw insertError;
 
                         setMsg(`✅ Welcome, ${staff.name}`);
-                        
-                        // เสียงแจ้งเตือนสั้นๆ (ถ้าต้องการความว้าวตอนพรีเซนต์)
-                        // new Audio('/success-beep.mp3').play().catch(() => {});
 
                     } catch (error: any) {
                         console.error("Scan Error:", error);
                         setMsg(`❌ ${error.message || "Database Error"}`);
                     } finally {
-                        // ไม่ว่าจะสำเร็จหรือพลาด ให้รอ 3 วินาทีแล้วรับสแกนใหม่
+                        // รอ 3 วินาทีแล้วรับสแกนใหม่
                         setTimeout(() => {
                             setMsg("Scan your QR Code");
                             isProcessingRef.current = false;
                         }, 3000);
                     }
 
-                }, (err) => { /* ignore */ });
+                }, (err) => { /* ignore scanning errors */ });
 
                 scannerRef.current = scanner;
             }
@@ -102,7 +95,7 @@ export default function ScanPage() {
 
         return () => {
             if (scannerRef.current) {
-                scannerRef.current.clear().catch(() => {});
+                scannerRef.current.clear().catch(() => { });
                 scannerRef.current = null;
             }
         };
@@ -127,16 +120,15 @@ export default function ScanPage() {
                 )}
             </div>
 
-            <div className={`mt-10 px-10 py-5 rounded-[2rem] font-black text-xl transition-all border-2 flex items-center justify-center min-w-[280px] ${
-                msg.includes('✅') ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/40' :
-                msg.includes('❌') ? 'bg-red-500/10 text-red-400 border-red-500/40' :
-                'bg-blue-500/5 text-blue-400 border-blue-500/20'
-            }`}>
+            <div className={`mt-10 px-10 py-5 rounded-[2rem] font-black text-xl transition-all border-2 flex items-center justify-center min-w-[280px] shadow-lg ${msg.includes('✅') ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/40 shadow-emerald-500/5' :
+                    msg.includes('❌') ? 'bg-red-500/10 text-red-400 border-red-500/40 shadow-red-500/5' :
+                        'bg-blue-500/5 text-blue-400 border-blue-500/20'
+                }`}>
                 {msg}
             </div>
 
-            <button onClick={() => window.location.reload()} className="mt-12 text-gray-600 text-[10px] uppercase font-bold tracking-widest hover:text-blue-400 transition-colors">
-                🔄 Reset Camera
+            <button onClick={() => window.location.reload()} className="mt-12 text-gray-600 text-[10px] uppercase font-bold tracking-widest hover:text-blue-400 transition-colors flex items-center gap-2">
+                🔄 Reset Camera / Refresh
             </button>
         </div>
     )
