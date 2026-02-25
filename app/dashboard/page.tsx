@@ -9,7 +9,7 @@ import {
 } from "recharts"
 
 export default function DashboardPage() {
-  // 1. State ทั้งหมด (รวมของเดิมและส่วน Attendance ใหม่)
+  // 1. State ทั้งหมด
   const [tasks, setTasks] = useState<any[]>([])
   const [staff, setStaff] = useState<any[]>([])
   const [attendance, setAttendance] = useState<any[]>([])
@@ -19,9 +19,9 @@ export default function DashboardPage() {
   const [taskCount, setTaskCount] = useState(0)
   const [completedCount, setCompletedCount] = useState(0)
   const [completedPercent, setCompletedPercent] = useState(0)
-  const [presentToday, setPresentToday] = useState(0)
+  const [presentToday, setPresentToday] = useState(0) // จะใช้เก็บจำนวนคนที่ยังไม่ Check-out
 
-  // 2. ฟังก์ชันดึงข้อมูลทั้งหมดจาก Supabase
+  // 2. ฟังก์ชันดึงข้อมูลจาก Supabase
   const fetchData = async () => {
     setLoading(true)
     const today = new Date().toISOString().split('T')[0] // วันที่ปัจจุบัน YYYY-MM-DD
@@ -30,18 +30,22 @@ export default function DashboardPage() {
     const { data: tasksData } = await supabase.from("tasks").select("*, staff(name)")
     const { data: staffData } = await supabase.from("staff").select("*")
     
-    // ดึงข้อมูลการเข้างานของวันนี้
-    const { data: attData, count: attCount } = await supabase
+    // ดึงข้อมูลการเข้างานของวันนี้ (ดึงมาทั้งหมดเพื่อเช็ค IN/OUT)
+    const { data: attData } = await supabase
       .from("attendance")
-      .select("*, staff(name)", { count: 'exact' })
+      .select("*, staff(name)")
       .gte("check_in_time", `${today}T00:00:00`)
       .lte("check_in_time", `${today}T23:59:59`)
+      .order('check_in_time', { ascending: false })
 
     if (tasksData) setTasks(tasksData)
     if (staffData) setStaff(staffData)  
+    
     if (attData) {
       setAttendance(attData)
-      setPresentToday(attCount || 0)
+      // 🔥 จุดที่แก้: นับเฉพาะคนที่สแกนเข้าแล้ว แต่ "ยังไม่มีเวลาสแกนออก"
+      const currentPresent = attData.filter(a => a.check_in_time && !a.check_out_time).length
+      setPresentToday(currentPresent)
     }
     
     // อัปเดต Stats สำหรับ Card
@@ -96,12 +100,12 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      {/* Stats Cards - ปรับเป็น 4 Column เพื่อรองรับ Attendance */}
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
-          title="Attendance Today" 
+          title="Staff Present Now" // 🔥 ปรับชื่อให้ชัดเจน
           value={`${presentToday} / ${staffCount}`} 
-          description="staff present now" 
+          description="currently active in office" 
           trend={`${staffCount > 0 ? Math.round((presentToday / staffCount) * 100) : 0}%`} 
         />
         <StatCard 
@@ -153,20 +157,31 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Today's Check-in Log (ตารางสรุปคนมาทำงานวันนี้) */}
+      {/* Today's Check-in Log (ปรับปรุงเพื่อโชว์ทั้งเข้าและออก) */}
       <div className="bg-white dark:bg-gray-800/40 p-8 rounded-[2.5rem] border border-gray-100 dark:border-gray-700/50">
         <h2 className="mb-6 font-black uppercase text-xs tracking-widest text-gray-400">Live Attendance Log</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           {attendance.length > 0 ? (
             attendance.map((att) => (
-              <div key={att.id} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700 rounded-2xl">
+              <div key={att.id} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700 rounded-2xl relative">
                 <div>
                   <p className="text-sm font-bold text-gray-800 dark:text-gray-200">{att.staff?.name}</p>
-                  <p className="text-[10px] text-emerald-500 font-black uppercase">
-                    {new Date(att.check_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </p>
+                  <div className="flex flex-col">
+                    <p className="text-[9px] text-emerald-500 font-black uppercase">
+                      IN: {new Date(att.check_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                    {/* 🔥 จุดที่แก้: แสดงเวลาออก ถ้าพนักงานสแกนออกแล้ว */}
+                    {att.check_out_time && (
+                      <p className="text-[9px] text-rose-500 font-black uppercase">
+                        OUT: {new Date(att.check_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+                {/* 🔥 จุดที่แก้: แสดงไฟกระพริบเฉพาะคนที่ "ยังไม่ออก" เท่านั้น */}
+                {!att.check_out_time && (
+                  <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+                )}
               </div>
             ))
           ) : (
