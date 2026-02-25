@@ -8,9 +8,9 @@ import {
   PieChart, Pie, Cell,
 } from "recharts"
 
-// 1. Data Mapping สำหรับแผนกและตำแหน่ง
+// 1. ชุดข้อมูลที่ถูกต้อง (ตรวจสอบชื่อให้ตรงกับในฐานข้อมูลของคุณ)
 const rolesByDept: Record<string, string[]> = {
-  "IT": ["Frontend Developer", "Backend Engineer", "Full Stack Developer", "DevOps Engineer"],
+  "IT": ["Frontend Developer", "Backend Engineer", "Full Stack Developer", "DevOps Engineer", "Mobile Developer"],
   "Design": ["Graphic Designer", "UI/UX Designer", "Product Designer"],
   "Management": ["Project Manager", "Product Owner", "Business Analyst"],
   "Marketing": ["Marketing Lead", "Content Creator", "Social Media Manager"],
@@ -24,19 +24,21 @@ export default function DashboardPage() {
   const [attendance, setAttendance] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Stats States
   const [staffCount, setStaffCount] = useState(0)
   const [taskCount, setTaskCount] = useState(0)
   const [completedCount, setCompletedCount] = useState(0)
   const [completedPercent, setCompletedPercent] = useState(0)
   const [presentToday, setPresentToday] = useState(0)
 
-  // State สำหรับ Dropdown กรองข้อมูล
+  // --- จุดที่แก้ไข: Dropdown States ---
   const [selectedDept, setSelectedDept] = useState("");
   const [selectedRole, setSelectedRole] = useState("");
 
   const handleDeptChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedDept(e.target.value);
-    setSelectedRole(""); // รีเซ็ตตำแหน่งทุกครั้งที่เปลี่ยนแผนก
+    const dept = e.target.value;
+    setSelectedDept(dept);
+    setSelectedRole(""); // 🔥 แก้ไข: รีเซ็ตตำแหน่งทันทีที่เปลี่ยนแผนก
   };
 
   const fetchData = async () => {
@@ -59,14 +61,11 @@ export default function DashboardPage() {
       setPresentToday(attCount || 0)
     }
     
-    const tCount = tasksData?.length || 0
-    const sCount = staffData?.length || 0
+    setTaskCount(tasksData?.length || 0)
+    setStaffCount(staffData?.length || 0)
     const cCount = tasksData?.filter(t => t.status === "Completed").length || 0
-    
-    setTaskCount(tCount)
-    setStaffCount(sCount)
     setCompletedCount(cCount)
-    setCompletedPercent(tCount > 0 ? Math.round((cCount / tCount) * 100) : 0)
+    setCompletedPercent(tasksData && tasksData.length > 0 ? Math.round((cCount / tasksData.length) * 100) : 0)
 
     setLoading(false)
   }
@@ -75,8 +74,7 @@ export default function DashboardPage() {
     fetchData()
   }, [])
 
-  // --- Logic กรองข้อมูลสำหรับ Charts ---
-  // กรองพนักงานตามแผนกและตำแหน่งที่เลือกจาก Dropdown
+  // --- จุดที่แก้ไข: กรองข้อมูลพนักงานสำหรับกราฟ ---
   const filteredStaff = staff.filter(member => {
     const matchDept = selectedDept ? member.department === selectedDept : true;
     const matchRole = selectedRole ? member.role === selectedRole : true;
@@ -91,7 +89,7 @@ export default function DashboardPage() {
   const taskData = [
     { name: "Completed", value: tasks.filter(t => t.status === "Completed").length },
     { name: "Pending", value: tasks.filter(t => t.status === "Pending").length },
-    { name: "In Progress", value: tasks.length - tasks.filter(t => t.status === "Completed").length - tasks.filter(t => t.status === "Pending").length },
+    { name: "In Progress", value: tasks.length - (tasks.filter(t => t.status === "Completed").length + tasks.filter(t => t.status === "Pending").length) },
   ]
 
   const COLORS = ["#10b981", "#f59e0b", "#3b82f6"]
@@ -108,37 +106,43 @@ export default function DashboardPage() {
           <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">Live Operational & Attendance Data</p>
         </div>
 
-        <div className="flex flex-wrap gap-3 w-full lg:w-auto">
+        <div className="flex flex-wrap gap-3 w-full lg:w-auto bg-gray-50 dark:bg-gray-800/50 p-3 rounded-2xl border border-gray-100 dark:border-gray-700">
           {/* Department Select */}
-          <select 
-            value={selectedDept}
-            onChange={handleDeptChange}
-            className="bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 ring-blue-500"
-          >
-            <option value="">All Departments</option>
-            {Object.keys(rolesByDept).map(dept => (
-              <option key={dept} value={dept}>{dept}</option>
-            ))}
-          </select>
+          <div className="flex flex-col">
+            <span className="text-[10px] font-bold text-gray-400 ml-2 mb-1 uppercase">Dept</span>
+            <select 
+              value={selectedDept}
+              onChange={handleDeptChange}
+              className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 ring-blue-500 min-w-[150px]"
+            >
+              <option value="">All Departments</option>
+              {Object.keys(rolesByDept).map(dept => (
+                <option key={dept} value={dept}>{dept}</option>
+              ))}
+            </select>
+          </div>
 
-          {/* Role Select - จะเปลี่ยนตามแผนก */}
-          <select 
-            value={selectedRole}
-            onChange={(e) => setSelectedRole(e.target.value)}
-            disabled={!selectedDept}
-            className={`bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 ring-blue-500 ${!selectedDept && 'opacity-50'}`}
-          >
-            <option value="">{selectedDept ? "All Roles" : "Select Dept First"}</option>
-            {selectedDept && rolesByDept[selectedDept].map(role => (
-              <option key={role} value={role}>{role}</option>
-            ))}
-          </select>
+          {/* Role Select - ปรับให้เปลี่ยนตาม Dept อัตโนมัติ */}
+          <div className="flex flex-col">
+            <span className="text-[10px] font-bold text-gray-400 ml-2 mb-1 uppercase">Position</span>
+            <select 
+              value={selectedRole}
+              onChange={(e) => setSelectedRole(e.target.value)}
+              disabled={!selectedDept}
+              className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 ring-blue-500 min-w-[180px] ${!selectedDept && 'opacity-50 cursor-not-allowed'}`}
+            >
+              <option value="">{selectedDept ? "All Roles" : "Select Dept First"}</option>
+              {selectedDept && rolesByDept[selectedDept].map(role => (
+                <option key={role} value={role}>{role}</option>
+              ))}
+            </select>
+          </div>
 
           <button
             onClick={fetchData}
-            className="px-4 py-2 text-xs font-bold bg-blue-600 text-white rounded-xl hover:scale-95 transition-all shadow-lg shadow-blue-500/20"
+            className="self-end px-5 py-2 text-xs font-black bg-blue-600 text-white rounded-xl hover:bg-blue-500 transition-all shadow-lg shadow-blue-500/20 uppercase tracking-tighter"
           >
-            🔄 Refresh
+            Refresh
           </button>
         </div>
       </div>
@@ -155,7 +159,7 @@ export default function DashboardPage() {
       <div className="grid md:grid-cols-2 gap-8">
         <div className="bg-white dark:bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-100 dark:border-gray-700/50 shadow-sm transition-all">
           <h2 className="mb-6 font-black uppercase text-xs tracking-widest text-gray-400">
-            Workload: {selectedDept || "All Departments"} {selectedRole && `- ${selectedRole}`}
+             Workload Bar: {selectedDept || "All Teams"}
           </h2>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={userTaskData}>
@@ -168,7 +172,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="bg-white dark:bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-100 dark:border-gray-700/50 shadow-sm transition-all">
-          <h2 className="mb-6 font-black uppercase text-xs tracking-widest text-gray-400">Overall Task Status</h2>
+          <h2 className="mb-6 font-black uppercase text-xs tracking-widest text-gray-400">Task Completion Rate</h2>
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
               <Pie data={taskData} dataKey="value" innerRadius={75} outerRadius={100} paddingAngle={8}>
